@@ -17,7 +17,7 @@ import traceback
 
 
 """
-Dieses Skript kann auf ein Outlook Gruppenpostfach zugreifen und dort Typo3-Kontaktfor-
+Das Skript kann auf ein Outlook Gruppenpostfach zugreifen und dort Typo3-Kontaktfor-
 mular-Anfragen aus dem Posteingang extrahieren. Dann kann das in RocketChat als Message gepostet werden,
 Das passiert über eine API. Zwischendurch werden die Mails erst mal sortiert in Typo3-versendet
 und normale Mails. Dann wird auch getrackt, welche Mails bereits als Aufgaben über die API
