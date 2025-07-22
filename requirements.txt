@@ -1,0 +1,6 @@
+exchangelib>=4.9.0
+requests>=2.25.0
+rocketchat-API
+dotenv
+bs4
+pprint
