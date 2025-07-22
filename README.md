@@ -52,7 +52,7 @@ If you can, restrict access to this file to all users except the one which is ru
 - A second message with details is posted as a thread under the first message, in order to clean up the channel the remaining fields are posted as a thread message. 
     - To achieve this, the message ID of the first message is retained and given as an argument to the thread posting function.
 - *Note:* Only required fields from the contact form are posted to RocketChat. Optional fields, such as `R Code` or `Datasets`, are ommitted for simplicity - but if you want, you can write a logic which checks for the presence of optional fields and posts them as well to the detail thread.
-- If posting was successful, a record of the processed email is created. The email is identified by its unique email message ID. This record is written to a `.csv` file named `processed_emails.cvs`, which will be created in the same directory as the script. 
+- If posting was successful, a record of the processed email is created. The email is identified by its unique email message ID. This record is written to a `.csv` file named `processed_emails.csv`, which will be created in the same directory as the script. 
 
 ## Known Shortcomings
 
