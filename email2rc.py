@@ -6,7 +6,7 @@ import logging
 from datetime import datetime, timezone
 from typing import Dict, List, Optional, Set
 import requests
-from exchangelib import Credentials, Account, DELEGATE, Message
+from exchangelib import Configuration, Credentials, Account, DELEGATE, Message
 import quopri
 import re
 from bs4 import BeautifulSoup
@@ -62,12 +62,18 @@ class Config:
         self.rc_channel = os.getenv("RC_CHANNEL")
 
 def init_exchange_connection(config: Config) -> Account:
-    """Initialisiert die Verbindung zu Exchange."""
+    """Initialisiert die Verbindung zu Exchange. Sollten hier mit der Konfigurations jemals
+     Fehler auftreten, in account() autodiscover auf True setzen und
+     config wegnehmen und dafür credentials hineintun. 
+     Autodiscover ist nur aus um Ressourcen zu sparen"""
     try:
         credentials = Credentials(username=config.uk_nummer, password=config.email_password)
+        exconfig = Configuration(credentials = credentials,
+                                service_endpoint='https://mail.uni-kassel.de/EWS/Exchange.asmx',
+                                auth_type='NTLM')
         account = Account(primary_smtp_address=config.email_address,
-                             credentials=credentials,
-                             autodiscover=True,
+                             config=exconfig,
+                             autodiscover=False,
                              access_type=DELEGATE)
         logger.info("Exchange-Verbindung erfolgreich hergestellt")
         return account

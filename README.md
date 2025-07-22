@@ -60,6 +60,7 @@ If you can, restrict access to this file to all users except the one which is ru
 - the `.csv` file could grow large over the years if there is a lot of traffic and there should be a mechanism that reduces it to the emails which are currently residing in the INBOX folder. 
 - Credentials are stored in clear text in a config file and as environment variables. Which is ok, but not totally secure. 
 - If the contact form field names are updated, the script has to be updated as well. Otherwise it breaks and the contact form is not transported correctly. If you were eager, you could implement a fallback for this, which automatically posts the whole email to RocketChat and does not discern between field names. 
+- Optimally, we would use the https://ecederstrand.github.io/exchangelib/#synchronization-subscriptions-and-notifications feature to receive notifications from Exchange Web Services and only run the script in case a new mail is in the INBOX
 
 
 
