@@ -109,31 +109,59 @@ def load_processed_emails(filename: str) -> Set[str]:
             logger.error(f"Fehler beim Laden der processed_emails.csv: {e}")
     return processed
 
-def create_processed_email_record(message_id: str, subject: str, sender: str) -> Dict:
-    """Erstellt einen Datensatz für eine verarbeitete E-Mail."""
-    return {
-        'message_id': message_id,
-        'subject': subject,
-        'sender': sender,
-        'processed_at': datetime.now().isoformat()
-    }
-
-def save_processed_email_records(filename: str, records: List[Dict]):
-    """Speichert eine Liste von E-Mail-Datensätzen in einer CSV-Datei."""
+def save_processed_email(filename: str, message_id):
     file_exists = os.path.exists(filename)
     try:
         with open(filename, 'a', newline='', encoding='utf-8') as file:
-            fieldnames = ['message_id', 'subject', 'sender', 'processed_at']
-            writer = csv.DictWriter(file, fieldnames=fieldnames)
-
+            writer = csv.DictWriter(file, fieldnames=['message_id'])
+            # Create file + header if it does not exist
             if not file_exists:
                 writer.writeheader()
+                logger.info("Erstelle CSV-Datei.")
+            # Check if the file is empty and create header if necessary
+            if file.tell() == 0:
+                writer.writeheader()
+                logger.info("Leere CSV-Datei - erstelle Header")
+            writer.writerow({'message_id': message_id})
 
-            writer.writerows(records)  # Mehrere Datensätze schreiben
-
-        logger.info(f"{len(records)} Einträge in processed_emails.csv gesetzt.")
+        logger.info("Eintrag in processed_emails.csv gesetzt.")
     except Exception as e:
-        logger.error(f"Fehler beim Speichern der verarbeiteten E-Mails: {e}")
+        logger.error(f"Fehler beim Speichern in processed_emails.csv: {e}")
+
+def clean_up_processed_file(filename: str, messages: list, processed_emails: Set[str]):
+    """Routine to prevent the csv file to grow larger and larger: Restrict the possible IDs that the file may
+    contain to those who are present in the INBOX. 
+    :param filename: The name, defined in Config (processed_emails.csv)
+    :param messages: A list of exchangelib Message objects, each having a message_id attribute
+    :param processed_emails: The result of reading the csv file with load_processed_emails()
+    """
+    logger.info("Finde obsolete Message-IDs in csv-Datei...")
+    message_ids = set()
+    file_exists = os.path.exists(filename)
+    for message in messages:
+        try:
+            message_ids.add(message.message_id)
+        except Exception as e:
+            logger.error(e)
+    #logger.info(pformat(message_ids))
+    obsolete_ids = processed_emails - message_ids # calculate set difference
+    processed_emails.difference_update(obsolete_ids) # update the set to contain in-obsolete ids
+    try:
+        with open(filename, 'w', encoding='utf-8') as file:
+            writer = csv.DictWriter(file, fieldnames=['message_id'])
+            if not file_exists:
+                logger.info("CSV-Datei erstellt.")
+                writer.writeheader()
+            # Check if the file is empty and create header if necessary
+            if file.tell() == 0:
+                writer.writeheader()
+                logger.info("Leere CSV-Datei - erstelle Header")
+            writer.writerows([{'message_id': mid} for mid in processed_emails])
+        logger.info(f"{len(obsolete_ids)} obsolete Message-IDs entfernt aus CSV-Datei.")
+        return processed_emails
+    except Exception as e:
+        logger.error(f"Fehler beim Speichern in CSV-Datei: {e}")
+        return None
 
 def check_typo3_x_mailer(message: Message) -> Optional[str]:
     """Prüft, ob ein TYPO3 X-Mailer Header vorhanden ist und gibt den Wert zurück."""
@@ -275,7 +303,7 @@ def parse_email_data(item: Message) -> Dict[str, str]:
     }
 
     parsed_data.update(results) # append the html table parsed dict
-    # logger.info(f"Parsed data content:{pprint(parsed_data)}")
+    #logger.info(f"Parsed data content:{pformat(parsed_data)}")
     return parsed_data
 
 def rc_post_message(config: Config, email_data: Dict[str, str], rocket: RocketChat) -> Optional[str]:
@@ -285,10 +313,13 @@ def rc_post_message(config: Config, email_data: Dict[str, str], rocket: RocketCh
     fachsemester = email_data['Fachsemester '].strip()
     sender = f"{email_data['sender_name']}"  # Absendername
     art = email_data['Art der Arbeit (Empra/ WHA/ Projekt/- oder Abschlussarbeit...)\n'].strip()
-    betreuung = email_data['Name der Betreuungsperson '].strip()
+    try: # Optionales Feld
+        betreuung = email_data['Name der Betreuungsperson '].strip()
+    except KeyError:
+        betreuung = "..."
     studiengang = email_data['Studiengang '].strip()
     fachgebiet = email_data['Fachgebiet, dem die Betreuungsperson angehört (z.B. "Entwicklungspsychologie")\n'].strip()
-    description = f"{pprint(email_data)}"
+    #description = f"{pprint(email_data)}"
     start_date = email_data.get('received_date', datetime.now().isoformat() + 'Z')
     # poste Nachricht
     try:
@@ -298,7 +329,7 @@ def rc_post_message(config: Config, email_data: Dict[str, str], rocket: RocketCh
             )
 
         logger.info(f"📊 API Response Status: {response.status_code}")
-        logger.info(f"📄 API Response JSON: {pprint(response.json())}")
+        #logger.info(f"📄 API Response JSON: {pprint(response.json())}")
 
         if response.status_code in [200, 201]:
             rc_message_id = response.json()['message']['_id']
@@ -318,15 +349,19 @@ def rc_post_detail_thread(rocket: RocketChat, config: Config, email_data: Dict[s
     beschreibung = email_data['Kurze Beschreibung des Projekts (Hypothesen, Ablauf, erhobene Variablen, Datenstruktur, geplante Analyse)\n']
     fragen = email_data['Konkreten Fragen + Eigene Lösungsansätze? ° ']
     try:
-        logger.info(f"Poste Details in Thread unter Nachricht mit ID {rc_id}")
+        rskript = email_data['Bei R Fragen: R Skript (bitte Code einfach in das Feld kopieren)\n']
+    except KeyError:
+        rskript = None
+    try:
+        logger.info(f"🚀 Poste Details in Thread unter Nachricht mit ID {rc_id}")
         response = rocket.chat_post_message(
             room_id=config.rc_channel,
             tmid=rc_id,
-            text=f"**Beschreibung**:\n{beschreibung}\n\n**Fragen**:\n{fragen}"
+            text=f"**Beschreibung**:\n{beschreibung}\n\n**Fragen**:\n{fragen}\n\n**R-Skript**:\n```r\n{rskript}\n```"
         )
 
         logger.info(f"📊 Detail-Thread: API Response Status: {response.status_code}")
-        logger.info(f"📄 Detail-Thread: API Response JSON: {pformat(response.json())}")
+        #logger.info(f"📄 Detail-Thread: API Response JSON: {pformat(response.json())}")
 
         if response.status_code in [200, 201]:
             logger.info(f"🎯 Rocket-Chat Detail Thread erfolgreich erstellt!")
@@ -341,18 +376,25 @@ def rc_post_detail_thread(rocket: RocketChat, config: Config, email_data: Dict[s
         logger.error(traceback.format_exc())
         return None
 
-def process_email(config: Config, account: Account, message: Message, processed_emails: Set[str]) -> bool:
-    """Verarbeitet eine einzelne E-Mail."""
-    message_id = message.message_id
-    subject = message.subject or "Kein Subject"
+def process_all_inbox(config: Config,
+                        account: Account,
+                        processed_emails: Set[str],
+                        rocket: RocketChat):
+    pass
 
-    logger.info(f"\n=== Verarbeite E-Mail ===")
-    logger.info(f"Message ID: {message_id}")
-    logger.info(f"Subject: {subject}")
-    logger.info(f"Sender: {message.sender}")
+def process_email(config: Config, account: Account, message: Message, processed_emails: Set[str], rocket: RocketChat) -> bool:
+    """Verarbeitet eine einzelne E-Mail."""
+    try:
+        message_id = message.message_id
+        subject = message.subject or "Kein Subject"
+        logger.info(f"\n=== Verarbeite E-Mail ===")
+        logger.info(f"Message ID: {message_id}")
+        logger.info(f"Subject: {subject}")
+    except Exception as e:
+        logger.error(f"Fehler beim Extrahieren der Message ID oder Subject Fields: {e}")
 
     if message_id in processed_emails:
-        logger.info(f"❌ Überspringe - bereits verarbeitet")
+        logger.info(f"⏭️ Überspringe - bereits zu RocketChat gesendet")
         return False
 
     logger.info(f"Führe TYPO3-Prüfung durch...")
@@ -364,36 +406,24 @@ def process_email(config: Config, account: Account, message: Message, processed_
     logger.info(f"🎯 TYPO3-Kontaktformular gefunden: {subject}")
 
     email_data = parse_email_data(message)
-    rocket = rocket_chat_login(config)
     rc_id = rc_post_message(config, email_data, rocket = rocket)
     rc_post_detail_thread(config = config, rocket = rocket, email_data = email_data, rc_id = rc_id)
+    save_processed_email(filename=config.processed_file, message_id=message_id)
     return True
 
-def process_emails(messages: list, config: Config, account: Account):
-    """Verarbeitet neue E-Mails aus dem Postfach."""
+def process_many_emails(messages: list, config: Config, account: Account, processed_emails: Set[str],
+                    rocket: RocketChat):
+    """Verarbeitet viele E-Mails."""
     try:
-        #messages = list(account.inbox.all().order_by('-datetime_received')[:50])
         logger.info(f"Verarbeite {len(messages)} E-Mails...")
-        processed_emails = load_processed_emails(config.processed_file)
-        processed_records = []
-
         for message in messages:
             try:
-                processed = process_email(config, account, message, processed_emails)
-                if processed:
-                    processed_records.append(create_processed_email_record(
-                        message.message_id,
-                        message.subject or '',
-                        str(message.sender) if message.sender else ''
-                    ))
+                process_email(config, account, message, processed_emails, rocket)
             except Exception as e:
                 logger.error(f"Fehler beim Verarbeiten der E-Mail {message.message_id}: {e}")
                 import traceback
                 logger.error(traceback.format_exc())
-
-        save_processed_email_records(config.processed_file, processed_records)
-        logger.info(f"Verarbeitung abgeschlossen: {len(processed_records)} neue RocketChat Einträge erstellt")
-
+        logger.info(f"Verarbeitung der Mails abgeschlossen.")
     except Exception as e:
         logger.error(f"Fehler beim Verarbeiten der E-Mails: {e}")
         import traceback
@@ -422,29 +452,61 @@ def sync_emails(account: Account):
         logger.error(traceback.format_exc())
         raise
 
+def maintain_notification_streaming(account: Account,
+                                    config: Config,
+                                    processed_emails: Set[str],
+                                    timeout_minutes: int=29, 
+                                    only_fields = ['headers', 'subject', 'sender', 'datetime_received', 'datetime_sent', 'body', 'message_id'],
+                                    rocket = RocketChat):
+    """:params: inbox = Account.inbox
+    :params: timeout_minutes = Positive integer between 1 and 29 (internally, 1 minute is added)
+    """
+    inbox = account.inbox
+    while True:  
+        try:
+            logger.info("🛜 Starte Notification Streaming Subscription.")  
+            with inbox.streaming_subscription() as subscription_id: 
+                logger.info("📭 Warte auf neue Mails.")
+                for notification in inbox.get_streaming_events(subscription_id, connection_timeout=timeout_minutes):  
+                    for event in notification.events:  
+                        if isinstance(event, NewMailEvent):  
+                            # Get the specific new mail item by ID
+                            logger.info("📬 Neue Mail!") 
+                            # time.sleep(1) # wait for the server to completely put the mail in INBOX
+                            # Fetch only this specific item with only the fields we need  
+                            items = list(account.fetch([event.item_id], only_fields=only_fields))
+                            item = items[0]
+                            #logger.info(f"Inhalt von items:\n{pformat(items)}")
+                            logger.info("Starte Verarbeitung der neuen Mail") 
+                            process_email(config=config, 
+                                            account=account, 
+                                            message=item,
+                                            processed_emails=processed_emails,
+                                            rocket=rocket)
+                            logger.info("📭 Warte auf weitere neue Mails.")
+        except (ConnectionError, TimeoutError) as e:  
+            logger.error(f"Verbindungsfehler oder Timeout während des Empfangens der Notifications: Verbindung wird in 5s wieder hergestellt: {e}")  
+            time.sleep(5)  # Brief pause before reconnecting  
+            continue
+
 def main():
     """Hauptfunktion."""
     config = Config()
-
     try:
         account = init_exchange_connection(config)
-        messages = sync_emails(account)
-        process_emails(messages, config, account)
+        rocket = rocket_chat_login(config)
+        processed_emails=load_processed_emails(config.processed_file)
+        logger.info("Lade max. 10 Emails aus der INBOX")
+        messages = list(account.inbox.all().order_by('-datetime_received')[:10])
+        logger.info(f"{len(messages)} Emails geladen.")
+        clean_up_processed_file(config.processed_file, messages, processed_emails)
+        process_many_emails(messages, config, account, processed_emails, rocket)
     except Exception as e:
         logger.error(f"Fehler beim ersten Abruf: {e}")
-    while True:
-        try:
-            with account.inbox.streaming_subscription() as subscription_id:
-                logger.info("Notification-Subscription gestartet.")
-                for notification in account.inbox.get_streaming_events(subscription_id, connection_timeout=30):
-                    for event in notification.events:                            
-                        if isinstance(event, NewMailEvent):
-                            logger.info("Neeue Mail!")
-                            messages = sync_emails(account)
-                            process_emails(messages, config, account)
-        except Exception as e:
-            logger.error(f"Fehler bei der Notification Subscription: {e}")
-            time.sleep(60) # pausiere 60 Sekunden bevor der While loop wieder gestartet wird, im Falle eines Fehlers. 
-
+    try:
+        maintain_notification_streaming(account, config, processed_emails, 29, rocket=rocket)
+    except Exception as e:
+        logger.error(f"Fehler beim Notification Streaming und Verarbeiten neuer Mails: {e}")
+        logger.error(traceback.format_exc())
 if __name__ == "__main__":
     main()
