@@ -406,7 +406,16 @@ def process_email(config: Config, account: Account, message: Message, processed_
     logger.info(f"🎯 TYPO3-Kontaktformular gefunden: {subject}")
 
     email_data = parse_email_data(message)
-    rc_id = rc_post_message(config, email_data, rocket = rocket)
+    # try except weil RocketChat Session Tokens ablaufen können nach default 90 Tagen
+    # unbekannt wie lange in unserer Installation gültig. 
+    try:
+        rc_id = rc_post_message(config, email_data, rocket = rocket)
+    except RocketAuthenticationException as e:
+        logger.error(f"Fehler bei RocketChat API Authentifizierung - möglicherweise ist Session Token abgelaufen. {e}")
+        rocket_chat_login(config)
+        logger.info("Versuche RocketChat Message noch mal zu posten:")
+        rc_id = rc_post_message(config, email_data, rocket = rocket)
+
     rc_post_detail_thread(config = config, rocket = rocket, email_data = email_data, rc_id = rc_id)
     save_processed_email(filename=config.processed_file, message_id=message_id)
     return True
