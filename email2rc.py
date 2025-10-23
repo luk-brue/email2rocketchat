@@ -337,9 +337,8 @@ def rc_post_message(config: Config, email_data: Dict[str, str], rocket: RocketCh
             return rc_message_id
         else:
             logger.error(f"❌ Fehler beim Erstellen der Rocket-Chat-Message: {response.status_code}")
-            logger.error(f"📄 Response Text: {len(response.text)} Zeichen")
+            logger.error(f"📄 Response Text: {pformat(response.text)}")
             return None
-
     except Exception as e:
         logger.error(f"❌ Unerwarteter Fehler bei der Rocket-Chat-API-Anfrage: {e}")
         logger.error(traceback.format_exc())
@@ -347,28 +346,47 @@ def rc_post_message(config: Config, email_data: Dict[str, str], rocket: RocketCh
 
 def rc_post_detail_thread(rocket: RocketChat, config: Config, email_data: Dict[str, str], rc_id: str) -> Optional[str]:
     beschreibung = email_data['Kurze Beschreibung des Projekts (Hypothesen, Ablauf, erhobene Variablen, Datenstruktur, geplante Analyse)\n']
+    beschreibung = beschreibung.replace("*", "∗") # multiplication star should not be interpreted as markdown
+    beschreibung = beschreibung.replace(">", "›") # > erzeugt Zitat-Blöcke, › nicht
     fragen = email_data['Konkreten Fragen + Eigene Lösungsansätze? ° ']
+    fragen = fragen.replace("*", "∗") 
+    fragen = fragen.replace(">", "›")
     try:
         rskript = email_data['Bei R Fragen: R Skript (bitte Code einfach in das Feld kopieren)\n']
+        rskript=(rskript[:100] + '\n[...] ' + f"{len(rskript)} weitere Zeichen") if len(rskript) > 100 else rskript
     except KeyError:
         rskript = None
     try:
         logger.info(f"🚀 Poste Details in Thread unter Nachricht mit ID {rc_id}")
+        detailtext=f"**Beschreibung**:\n{beschreibung}\n\n**Fragen**:\n{fragen}\n\n**R-Skript**:\n```r\n{rskript}\n```"
+        # RocketChat hat default die Einstellung Message_MaxAllowedSize auf 5000 Zeichen
+        # Alles über 5000 Zeichen wird abgeschnitten, damit die Nachricht gepostet werden kann. 
+        croppedtext=(detailtext[:4959] + '\n\n[...] 5000-Zeichen-Limit erreicht') if len(detailtext) > 5000 else detailtext
+        # response = rocket.chat_send_message(
+        #     message={"rid": config.rc_channel,
+        #     "tmid": rc_id,
+        #     "emoji": ":mag_right:",
+        #     "blocks": [{"type": "section",
+        #         "text": {"type": "mrkdwn",
+        #             "text": croppedtext
+        #             }
+        #             }]
+        #     }
+        # )
         response = rocket.chat_post_message(
             room_id=config.rc_channel,
             tmid=rc_id,
-            text=f"**Beschreibung**:\n{beschreibung}\n\n**Fragen**:\n{fragen}\n\n**R-Skript**:\n```r\n{rskript}\n```"
+            text=croppedtext
         )
 
         logger.info(f"📊 Detail-Thread: API Response Status: {response.status_code}")
-        #logger.info(f"📄 Detail-Thread: API Response JSON: {pformat(response.json())}")
 
         if response.status_code in [200, 201]:
             logger.info(f"🎯 Rocket-Chat Detail Thread erfolgreich erstellt!")
             return response.json()['success']
         else:
             logger.error(f"❌ Fehler beim Erstellen des RocketChat Detail Threads: {response.status_code}")
-            logger.error(f"📄 Response Text: {len(response.text)} Zeichen")
+            logger.error(f"📄 Response Text: {pformat(response.text)}")
             return None
 
     except Exception as e:
