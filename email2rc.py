@@ -383,7 +383,7 @@ def rc_post_detail_thread(rocket: RocketChat, config: Config, email_data: Dict[s
 
         if response.status_code in [200, 201]:
             logger.info(f"🎯 Rocket-Chat Detail Thread erfolgreich erstellt!")
-            return response.json()['success']
+            return response.json()['message']['_id'] # returns the message ID
         else:
             logger.error(f"❌ Fehler beim Erstellen des RocketChat Detail Threads: {response.status_code}")
             logger.error(f"📄 Response Text: {pformat(response.text)}")
@@ -393,6 +393,34 @@ def rc_post_detail_thread(rocket: RocketChat, config: Config, email_data: Dict[s
         logger.error(f"❌ Unerwarteter Fehler bei dem Erstellen des RocketChat Detail Threads: {e}")
         logger.error(traceback.format_exc())
         return None
+
+def rc_post_template(rocket: RocketChat, 
+                    config: Config,  
+                    rc_id: str) -> Optional[str]:
+    try:
+        logger.info(f"🚀 Poste Protokoll Template in Thread unter Nachricht mit ID {rc_id}")
+        text="Kopiere dieses Muster-Protokoll und fülle die Felder aus. Sende es in diesem Thread als Nachricht.\n```\nHey @fb01bot, hier ist das Protokoll:\n\n---Hat eine Beratung stattgefunden? (Nein / Präsenz / Zoom)---\nPräsenz\n---Datum der Beratung (TT.MM.JJJJ / frei lassen)---\n\n---Dauer der Beratung in Minuten---\n45\n---Erwähne hier alle Beratenden mit @uk...---\n\n---Vorbereitungszeit aller Beratenden zusammen, in Minuten, ohne Email-Verkehr, darf auch 0 sein---\n10\n---Nachbereitungszeit aller Beratenden zusammen, in Minuten, ohne Email-Verkehr, darf auch 0 sein---\n10\n ---Um die wievielte Beratung handelt es sich für dieses individuelle Anliegen? (1, 2, 3)---\n1\n```"
+        response = rocket.chat_post_message(
+            room_id=config.rc_channel,
+            tmid=rc_id,
+            text=text
+        )
+
+        logger.info(f"📊 Protokoll Template Message: API Response Status: {response.status_code}")
+
+        if response.status_code in [200, 201]:
+            logger.info(f"🎯 Rocket-Chat Protokoll Template erfolgreich versandt!")
+            return response.json()['message']['_id'] # returns the message ID
+        else:
+            logger.error(f"❌ Fehler beim Versenden des RocketChat Protokoll Templates: {response.status_code}")
+            logger.error(f"📄 Response Text: {pformat(response.text)}")
+            return None
+
+    except Exception as e:
+        logger.error(f"❌ Unerwarteter Fehler beim Versenden des RocketChat Protokoll Templates: {e}")
+        logger.error(traceback.format_exc())
+        return None
+
 
 def process_all_inbox(config: Config,
                         account: Account,
@@ -433,9 +461,9 @@ def process_email(config: Config, account: Account, message: Message, processed_
         rocket_chat_login(config)
         logger.info("Versuche RocketChat Message noch mal zu posten:")
         rc_id = rc_post_message(config, email_data, rocket = rocket)
-
     rc_post_detail_thread(config = config, rocket = rocket, email_data = email_data, rc_id = rc_id)
     save_processed_email(filename=config.processed_file, message_id=message_id)
+    rc_post_template(config = config, rocket = rocket, rc_id = rc_id)
     return True
 
 def process_many_emails(messages: list, config: Config, account: Account, processed_emails: Set[str],
