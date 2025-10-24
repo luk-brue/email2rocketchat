@@ -390,7 +390,7 @@ def rc_post_detail_thread(rocket: RocketChat, config: Config, email_data: Dict[s
             return None
 
     except Exception as e:
-        logger.error(f"❌ Unerwarteter Fehler bei dem Erstellen des RocketChat Detail Threads: {e}")
+        logger.error(f"❌ Unerwarteter Fehler beim Erstellen des RocketChat Detail Threads: {e}")
         logger.error(traceback.format_exc())
         return None
 
@@ -399,7 +399,7 @@ def rc_post_template(rocket: RocketChat,
                     rc_id: str) -> Optional[str]:
     try:
         logger.info(f"🚀 Poste Protokoll Template in Thread unter Nachricht mit ID {rc_id}")
-        text="Kopiere dieses Muster-Protokoll und fülle die Felder aus. Sende es in diesem Thread als Nachricht.\n```\nHey @fb01bot, hier ist das Protokoll:\n\n---Hat eine Beratung stattgefunden? (Nein / Präsenz / Zoom)---\nPräsenz\n---Datum der Beratung (TT.MM.JJJJ / frei lassen)---\n\n---Dauer der Beratung in Minuten---\n45\n---Erwähne hier alle Beratenden mit @uk...---\n\n---Vorbereitungszeit aller Beratenden zusammen, in Minuten, ohne Email-Verkehr, darf auch 0 sein---\n10\n---Nachbereitungszeit aller Beratenden zusammen, in Minuten, ohne Email-Verkehr, darf auch 0 sein---\n10\n ---Um die wievielte Beratung handelt es sich für dieses individuelle Anliegen? (1, 2, 3)---\n1\n```"
+        text=f"Protokoll-Vorlage: Sende sie nach der Beratung ausgefüllt in diesen Thread.\n```\n@fb01bot : Protokoll zur ID={rc_id}\n\n--- **Beratung?** (Präsenz/Zoom/Keine)---\nPräsenz\n--- **Datum d. Beratung** (TT.MM.JJJJ) ---\n\n--- **Dauer d. Beratung** in Minuten ---\n45\n--- **Tandempartner∗in** (@uk...) ---\n@\n--- **Vorbereitungszeit aller Beratenden addiert**, in Minuten, ohne Email-Verkehr ---\n0\n--- **Nachbereitungszeit aller Beratenden addiert**, in Minuten, ohne Email-Verkehr ---\n10\n--- **Nummer der Beratung** (für dieses Anliegen) (1, 2, 3...) ---\n1\n--- **Schwierigkeitsgrad der Gesprächssituation** (0=super easy - 100=sehr herausfordernd) ---\n\n--- **Herausforderungen** (Schlagworte) ---\n\n--- **Inhaltliche Themen** (Schlagworte) ---\n\n--- **Das Anliegen konnte zufriedenstellend geklärt werden** (0 = gar nicht - 100 = äußerst gut) ---\n\n--- **Zusätzliche Angaben** (Freitext) ---\n\n```"
         response = rocket.chat_post_message(
             room_id=config.rc_channel,
             tmid=rc_id,
