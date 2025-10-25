@@ -3,4 +3,4 @@
 __pycache__/**
 .Rproj.user/**
 oldstuff/**
-processed_emails.csv
+*.csv

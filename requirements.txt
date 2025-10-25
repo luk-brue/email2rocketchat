@@ -3,3 +3,4 @@ requests>=2.25.0
 rocketchat-API
 dotenv
 bs4
+pandas

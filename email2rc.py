@@ -1,5 +1,6 @@
 import csv
 import os
+from stats_table_manager import StatsTableManager # custom class
 from dotenv import load_dotenv
 import re
 import time
@@ -50,6 +51,9 @@ RC_USER = username rocketchat
 # Logging konfigurieren
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
+
+# Statistik-Klasse
+stats = StatsTableManager(logger=logger)
 
 # Konfigurationsklasse
 class Config:
@@ -301,7 +305,6 @@ def parse_email_data(item: Message) -> Dict[str, str]:
     try: # optionales Feld.
         rskript = results['Bei R Fragen: R Skript (bitte Code einfach in das Feld kopieren)\n']
         rskript = '\n'.join(rskript.splitlines()) # remove \r\n (Windows type Line Endings) and replace with \n
-        logger.info(f"R-Skript raw: {repr(rskript)}")
     except KeyError:
         rskript = None
     
@@ -329,7 +332,7 @@ def parse_email_data(item: Message) -> Dict[str, str]:
         'rskript': rskript
     }
 
-    parsed_data.update(results) # append the html table parsed dict
+    #parsed_data.update(results) # append the html table parsed dict
     #logger.info(f"Parsed data content:{pformat(parsed_data)}")
     return parsed_data
 
@@ -477,7 +480,7 @@ def process_email(config: Config, account: Account, message: Message, processed_
 
     email_data = parse_email_data(message)
     # try except weil RocketChat Session Tokens ablaufen können nach default 90 Tagen
-    # unbekannt wie lange in unserer Installation gültig. 
+    # unbekannt wie lange in unserer Installation gültig.
     try:
         rc_id = rc_post_message(config, email_data, rocket = rocket)
     except RocketAuthenticationException as e:
@@ -487,7 +490,18 @@ def process_email(config: Config, account: Account, message: Message, processed_
         rc_id = rc_post_message(config, email_data, rocket = rocket)
     rc_post_detail_thread(config = config, rocket = rocket, email_data = email_data, rc_id = rc_id)
     save_processed_email(filename=config.processed_file, message_id=message_id)
-    rc_post_template(config = config, rocket = rocket, rc_id = rc_id)
+    # collect keys and data to be saved in stats.csv
+    try:
+        allowed_keys = set(stats.HEADERS)
+        mail_record = {k: v for k, v in email_data.items() if k in allowed_keys}
+        mail_record.update({'tmid': rc_id}) # add the thread message id
+    except:
+        logger.error("Fehler beim Sammeln der Email-Daten für die Statistik")
+    stats.append_record(mail_record) # save data to stats.csv
+    rc_post_template(config = config, 
+        rocket = rocket, 
+        email_data = email_data, 
+        rc_id = rc_id)
     return True
 
 def process_many_emails(messages: list, config: Config, account: Account, processed_emails: Set[str],
@@ -567,7 +581,7 @@ def maintain_notification_streaming(account: Account,
             logger.error(f"Verbindungsfehler oder Timeout während des Empfangens der Notifications: Verbindung wird in 5s wieder hergestellt: {e}")  
             time.sleep(5)  # Brief pause before reconnecting  
             continue
-
+    
 def rocketchat_listener(config: Config,):
     logger.info("Rufe neue Mentions von Rocketchat ab.")
 
