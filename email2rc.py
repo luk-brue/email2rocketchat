@@ -253,7 +253,7 @@ def parse_email_data(item: Message) -> Dict[str, str]:
         email_date = item.datetime_sent.isoformat()
         logger.info(f"📅 E-Mail-Datum (gesendet): {email_date}")
     else:
-        email_date = datetime.now().isoformat()
+        email_date = datetime.now().isoformat() + 'Z'
         logger.info(f"📅 Fallback E-Mail-Datum: {email_date}")
 
     # Absendername extrahieren
@@ -293,13 +293,40 @@ def parse_email_data(item: Message) -> Dict[str, str]:
             logger.error(f"Fehler beim Verarbeiten des Body: {e}")
     else:
         logger.info("❌ Kein Body Attribut verfügbar")
+    
+    try: # Optionales Feld
+        betreuung = results['Name der Betreuungsperson '].strip()
+    except KeyError:
+        betreuung = "..."
+    try: # optionales Feld.
+        rskript = results['Bei R Fragen: R Skript (bitte Code einfach in das Feld kopieren)\n']
+        rskript = '\n'.join(rskript.splitlines()) # remove \r\n (Windows type Line Endings) and replace with \n
+        logger.info(f"R-Skript raw: {repr(rskript)}")
+    except KeyError:
+        rskript = None
+    
+    beschreibung = results['Kurze Beschreibung des Projekts (Hypothesen, Ablauf, erhobene Variablen, Datenstruktur, geplante Analyse)\n']
+    beschreibung = beschreibung.replace("*", "∗") # multiplication star should not be interpreted as markdown
+    beschreibung = beschreibung.replace(">", "›") # > erzeugt Zitat-Blöcke, › nicht
+    fragen = results['Konkreten Fragen + Eigene Lösungsansätze? ° ']
+    fragen = fragen.replace("*", "∗") 
+    fragen = fragen.replace(">", "›")
 
     parsed_data = {
         'sender_name': sender_name,  # Nur den Namen
         #'email_content': table_content,  # Nur die HTML-Tabelle
         'subject': item.subject,
         'sender': str(item.sender) if item.sender else 'Unbekannt',
-        'received_date': email_date
+        'received_date': email_date,
+        'message_id': item.message_id,
+        'fachsemester': results['Fachsemester '].strip(),
+        'art': results['Art der Arbeit (Empra/ WHA/ Projekt/- oder Abschlussarbeit...)\n'].strip(),
+        'betreuung': betreuung,
+        'studiengang': results['Studiengang '].strip(),
+        'fachgebiet': results['Fachgebiet, dem die Betreuungsperson angehört (z.B. "Entwicklungspsychologie")\n'].strip(),
+        'beschreibung': beschreibung,
+        'fragen': fragen,
+        'rskript': rskript
     }
 
     parsed_data.update(results) # append the html table parsed dict
@@ -310,17 +337,14 @@ def rc_post_message(config: Config, email_data: Dict[str, str], rocket: RocketCh
     """Postet eine Message in Rocket Chat"""
     logger.info("🚀 Erstelle Rocket-Chat-Nachricht...")
     # extrahiere Felder aus Dict
-    fachsemester = email_data['Fachsemester '].strip()
+    fachsemester = f"{email_data['fachsemester']}"
     sender = f"{email_data['sender_name']}"  # Absendername
-    art = email_data['Art der Arbeit (Empra/ WHA/ Projekt/- oder Abschlussarbeit...)\n'].strip()
-    try: # Optionales Feld
-        betreuung = email_data['Name der Betreuungsperson '].strip()
-    except KeyError:
-        betreuung = "..."
-    studiengang = email_data['Studiengang '].strip()
-    fachgebiet = email_data['Fachgebiet, dem die Betreuungsperson angehört (z.B. "Entwicklungspsychologie")\n'].strip()
+    art = f"{email_data['art']}"
+    betreuung = f"{email_data['betreuung']}"
+    studiengang = f"{email_data['studiengang']}"
+    fachgebiet = f"{email_data['fachgebiet']}"
     #description = f"{pprint(email_data)}"
-    start_date = email_data.get('received_date', datetime.now().isoformat() + 'Z')
+    start_date = f"{email_data['received_date']}"
     # poste Nachricht
     try:
         response = rocket.chat_post_message(
@@ -345,23 +369,22 @@ def rc_post_message(config: Config, email_data: Dict[str, str], rocket: RocketCh
         return None
 
 def rc_post_detail_thread(rocket: RocketChat, config: Config, email_data: Dict[str, str], rc_id: str) -> Optional[str]:
-    beschreibung = email_data['Kurze Beschreibung des Projekts (Hypothesen, Ablauf, erhobene Variablen, Datenstruktur, geplante Analyse)\n']
-    beschreibung = beschreibung.replace("*", "∗") # multiplication star should not be interpreted as markdown
-    beschreibung = beschreibung.replace(">", "›") # > erzeugt Zitat-Blöcke, › nicht
-    fragen = email_data['Konkreten Fragen + Eigene Lösungsansätze? ° ']
-    fragen = fragen.replace("*", "∗") 
-    fragen = fragen.replace(">", "›")
-    try:
-        rskript = email_data['Bei R Fragen: R Skript (bitte Code einfach in das Feld kopieren)\n']
-        rskript=(rskript[:100] + '\n[...] ' + f"{len(rskript)} weitere Zeichen") if len(rskript) > 100 else rskript
-    except KeyError:
-        rskript = None
+    beschreibung = email_data['beschreibung']
+    fragen = email_data['fragen']
+    rskript = email_data['rskript']
     try:
         logger.info(f"🚀 Poste Details in Thread unter Nachricht mit ID {rc_id}")
         detailtext=f"**Beschreibung**:\n{beschreibung}\n\n**Fragen**:\n{fragen}\n\n**R-Skript**:\n```r\n{rskript}\n```"
+        msg_len = len(detailtext)
+        if msg_len <= 5000:
+            croppedtext = detailtext
+        elif rskript == None: # Don't add closing backticks if Rscript is not there
+            croppedtext = detailtext[:4975] + f"\n[...] {msg_len - 4994} weitere Zeichen"
+        else: # Do add closing backticks if Rscript exists
+            croppedtext = detailtext[:4965] + f"\n[...] {msg_len - 4994} weitere Zeichen\n```"
         # RocketChat hat default die Einstellung Message_MaxAllowedSize auf 5000 Zeichen
         # Alles über 5000 Zeichen wird abgeschnitten, damit die Nachricht gepostet werden kann. 
-        croppedtext=(detailtext[:4959] + '\n\n[...] 5000-Zeichen-Limit erreicht') if len(detailtext) > 5000 else detailtext
+        #croppedtext=(detailtext[:4959] + '\n\n[...] 5000-Zeichen-Limit erreicht') if len(detailtext) > 5000 else detailtext
         # response = rocket.chat_send_message(
         #     message={"rid": config.rc_channel,
         #     "tmid": rc_id,
@@ -399,7 +422,7 @@ def rc_post_template(rocket: RocketChat,
                     rc_id: str) -> Optional[str]:
     try:
         logger.info(f"🚀 Poste Protokoll Template in Thread unter Nachricht mit ID {rc_id}")
-        text=f"Protokoll-Vorlage: Sende sie nach der Beratung ausgefüllt in diesen Thread.\n```\n@fb01bot : Protokoll zur ID={rc_id}\n\n--- **Beratung?** (Präsenz/Zoom/Keine)---\nPräsenz\n--- **Datum d. Beratung** (TT.MM.JJJJ) ---\n\n--- **Dauer d. Beratung** in Minuten ---\n45\n--- **Tandempartner∗in** (@uk...) ---\n@\n--- **Vorbereitungszeit aller Beratenden addiert**, in Minuten, ohne Email-Verkehr ---\n0\n--- **Nachbereitungszeit aller Beratenden addiert**, in Minuten, ohne Email-Verkehr ---\n10\n--- **Nummer der Beratung** (für dieses Anliegen) (1, 2, 3...) ---\n1\n--- **Schwierigkeitsgrad der Gesprächssituation** (0=super easy - 10=sehr herausfordernd) ---\n\n--- **Herausforderungen** (Schlagworte) ---\n\n--- **Inhaltliche Themen** (Schlagworte) ---\n\n--- **Das Anliegen konnte zufriedenstellend geklärt werden** (0 = gar nicht - 10 = äußerst gut) ---\n\n--- **Anliegen und gegebene Ratschläge** (Freitext) ---\n\n```"
+        text=f"Protokoll-Vorlage: Sende sie nach der Beratung ausgefüllt in diesen Thread.\n```\n@fb01bot : Protokoll zur ID={rc_id}\n\n--- **Beratung?** (Präsenz/Zoom/Keine)---\nPräsenz\n--- **Datum d. Beratung** (TT.MM.JJJJ) ---\n\n--- **Dauer d. Beratung** in Minuten ---\n45\n--- **Tandempartner∗in** (@uk...) ---\n@\n--- **Vorbereitungszeit aller Beratenden addiert**, in Minuten, ohne Email-Verkehr ---\n0\n--- **Nachbereitungszeit aller Beratenden addiert**, in Minuten, ohne Email-Verkehr ---\n10\n--- **Nummer der Beratung** (für dieses Anliegen) (1, 2, 3...) ---\n1\n--- **Schwierigkeitsgrad der Gesprächssituation** (0 = super easy - 10 = sehr herausfordernd) ---\n\n--- **Herausforderungen** (Schlagworte) ---\n\n--- **Inhaltliche Themen / Analysemethoden** (Schlagworte) ---\n\n--- **Das Anliegen konnte zufriedenstellend geklärt werden** (0 = gar nicht - 10 = äußerst gut) ---\n\n--- **Anliegen und gegebene Ratschläge** (Freitext) ---\n\n```"
         response = rocket.chat_post_message(
             room_id=config.rc_channel,
             tmid=rc_id,
@@ -457,9 +480,9 @@ def process_email(config: Config, account: Account, message: Message, processed_
     try:
         rc_id = rc_post_message(config, email_data, rocket = rocket)
     except RocketAuthenticationException as e:
-        logger.error(f"Fehler bei RocketChat API Authentifizierung - möglicherweise ist Session Token abgelaufen. {e}")
+        logger.error(f"Fehler bei RocketChat API Authentifizierung - möglicherweise ist Session Token abgelaufen.{e}")
         rocket_chat_login(config)
-        logger.info("Versuche RocketChat Message noch mal zu posten:")
+        logger.info("Login wurde erneuert. Versuche RocketChat Message noch mal zu posten:")
         rc_id = rc_post_message(config, email_data, rocket = rocket)
     rc_post_detail_thread(config = config, rocket = rocket, email_data = email_data, rc_id = rc_id)
     save_processed_email(filename=config.processed_file, message_id=message_id)
@@ -543,6 +566,12 @@ def maintain_notification_streaming(account: Account,
             logger.error(f"Verbindungsfehler oder Timeout während des Empfangens der Notifications: Verbindung wird in 5s wieder hergestellt: {e}")  
             time.sleep(5)  # Brief pause before reconnecting  
             continue
+
+def rocketchat_listener(config: Config,):
+    logger.info("Rufe neue Mentions von Rocketchat ab.")
+
+def rocketchat_protocol_receiver(config: Config):
+    logger.info("Verarbeite das erhaltene Protokoll")
 
 def main():
     """Hauptfunktion."""
