@@ -29,17 +29,19 @@ class StatsTableManager:
     def __init__(self, logger):
         self.logger = logger
         if not os.path.exists(self.FILENAME):
-            self.logger.info(f"StatsTableManager: {self.FILENAME} not found. Creating new file.")
+            self.logger.info(f"StatsTableManager: {self.FILENAME} nicht gefunden. Erstelle neue Datei.")
             pd.DataFrame(columns=self.HEADERS).to_csv(self.FILENAME, index=False)
         self._load_df()
 
     def _load_df(self):
+        self.logger.info(f"StatsTableManager: {self.FILENAME} gefunden.")
         self.df = pd.read_csv(self.FILENAME, dtype=str)
+        self.logger.info(f"StatsTableManager: {self.FILENAME} eingelesen.")
         self.df.fillna('', inplace=True)  # treat empty as ""
 
     def _save_df(self):
         self.df.to_csv(self.FILENAME, index=False)
-        self.logger.info("StatsTableManager: Wrote stats to csv.")
+        self.logger.info("StatsTableManager: Daten in CSV auf Festplatte gespeichert.")
 
     def append_record(self, record_dict):
         """Add a new row. Missing fields default to empty string."""

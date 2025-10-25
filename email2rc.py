@@ -170,7 +170,7 @@ def clean_up_processed_file(filename: str, messages: list, processed_emails: Set
 def check_typo3_x_mailer(message: Message) -> Optional[str]:
     """Prüft, ob ein TYPO3 X-Mailer Header vorhanden ist und gibt den Wert zurück."""
     if not hasattr(message, 'headers') or not message.headers:
-        logger.info("❌ Keine Headers verfügbar")
+        logger.info("Keine Headers verfügbar")
         return None
 
     for header in message.headers:
@@ -178,7 +178,7 @@ def check_typo3_x_mailer(message: Message) -> Optional[str]:
             logger.info(f"✅ X-Mailer gefunden: '{header.value}'")
             return header.value
 
-    logger.info("❌ Kein X-Mailer Header gefunden")
+    logger.info("Kein X-Mailer Header gefunden")
     return None
 
 def is_typo3_contact_form(message: Message) -> bool:
@@ -194,7 +194,7 @@ def is_typo3_contact_form(message: Message) -> bool:
     subject = message.subject or ""
     reply_prefixes = ['AW:', 'RE:', 'Aw:', 'Re:', 'aw:', 're:']
     if any(subject.strip().startswith(prefix) for prefix in reply_prefixes):
-        logger.info(f"❌ Subject hat Antwort-Präfix: '{subject}'")
+        logger.info(f"Subject hat Antwort-Präfix: '{subject}'")
         return False
 
     # Prüfung auf References oder In-Reply-To Header (deutet auf Antwort hin)
@@ -203,7 +203,7 @@ def is_typo3_contact_form(message: Message) -> bool:
             if hasattr(header, 'name') and hasattr(header, 'value'):
                 header_name = header.name.lower()
                 if header_name in ['references', 'in-reply-to']:
-                    logger.info(f"❌ {header.name} Header gefunden")
+                    logger.info(f"{header.name} Header gefunden")
                     return False
 
     # Alle verfügbaren Body-Inhalte sammeln
@@ -217,7 +217,7 @@ def is_typo3_contact_form(message: Message) -> bool:
                 logger.info(f"✅ {body_attr} gefunden (Länge: {len(body_str)})")
 
     if not all_body_content:
-        logger.info("❌ Kein Body-Inhalt verfügbar")
+        logger.info("Kein Body-Inhalt verfügbar")
         return False
 
     # Prüfung auf TYPO3-Kontaktformular-Kennzeichen
@@ -241,7 +241,7 @@ def is_typo3_contact_form(message: Message) -> bool:
         logger.info("🎯 Genug Indikatoren gefunden - TYPO3 Kontaktformular erkannt!")
         return True
 
-    logger.info("❌ Finale Entscheidung: Nicht als TYPO3-Kontaktformular erkannt")
+    logger.info("Finale Entscheidung: Nicht als TYPO3-Kontaktformular erkannt")
     return False
 
 def parse_email_data(item: Message) -> Dict[str, str]:
@@ -290,13 +290,13 @@ def parse_email_data(item: Message) -> Dict[str, str]:
                     inhalt = columns[1].text
                     results[feld] = inhalt
             else:
-                logger.info("❌ Keine HTML-Tabelle gefunden")
+                logger.info("Keine HTML-Tabelle gefunden")
                 logger.info(f"Gesamter Body-Inhalt: {body}")  # Protokolliere den gesamten Body
                 results = None
         except Exception as e:
             logger.error(f"Fehler beim Verarbeiten des Body: {e}")
     else:
-        logger.info("❌ Kein Body Attribut verfügbar")
+        logger.info("Kein Body Attribut verfügbar")
     
     try: # Optionales Feld
         betreuung = results['Name der Betreuungsperson '].strip()
@@ -473,7 +473,7 @@ def process_email(config: Config, account: Account, message: Message, processed_
     logger.info(f"Führe TYPO3-Prüfung durch...")
 
     if not is_typo3_contact_form(message):
-        logger.info(f"❌ Nicht als TYPO3-Kontaktformular erkannt")
+        logger.info(f"Nicht als TYPO3-Kontaktformular erkannt")
         return False
 
     logger.info(f"🎯 TYPO3-Kontaktformular gefunden: {subject}")
