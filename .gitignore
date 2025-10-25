@@ -4,3 +4,4 @@ __pycache__/**
 .Rproj.user/**
 oldstuff/**
 *.csv
+room_id_cache.txt

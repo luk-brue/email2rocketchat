@@ -22,8 +22,10 @@ class StatsTableManager:
         'betreuung',
         'studiengang',
         'fachgebiet',
-        'beratung_nr',
-        'protocol_send_date'
+        'protocol_send_date',
+        'beratung_type', 'beratung_datum', 'beratung_dauer',
+        'tandem', 'vorbereitung', 'nachbereitung', 'beratung_nr', 'schwierigkeit',
+        'herausforderungen', 'inhalt', 'klärung', 'ratschläge'
     ]
 
     def __init__(self, logger):

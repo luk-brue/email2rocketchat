@@ -17,6 +17,7 @@ from bs4 import BeautifulSoup
 from pprint import pprint, pformat
 from rocketchat_API.rocketchat import RocketChat
 import traceback
+import json
 
 
 
@@ -581,9 +582,78 @@ def maintain_notification_streaming(account: Account,
             logger.error(f"Verbindungsfehler oder Timeout während des Empfangens der Notifications: Verbindung wird in 5s wieder hergestellt: {e}")  
             time.sleep(5)  # Brief pause before reconnecting  
             continue
+
+# Protokoll-Empfangslogik
+def parse_protocol_message(msg_text):
+    """
+    Wird angewendet auf den 'msg'-Inhalt einer Mention aus dem chat.getMentions JSON Output
+    Parses a protocol message with alternating '--- variable ---' and 'value' blocks.
+
+    Returns a dictionary with cleaned variable names as keys and their corresponding values.
+    """
+    protocol_data = {}
+
+    # Parse the header for meta-info (e.g., tm_id)
+    # header_match = re.search(r'tm_id=([a-zA-Z0-9]+)', msg_text)
+    # if header_match:
+    #     protocol_data['tmid'] = header_match.group(1)
     
-def rocketchat_listener(config: Config,):
+    # Split the message into blocks
+    blocks = re.split(r'---', msg_text)
+    blocks = [block.strip() for block in blocks if block.strip()]
+    blocks = blocks[1:]  # discard first block   
+    # Pair variable names with values
+    i = 0
+    while i < len(blocks) - 1:
+        var_line = blocks[i]
+        val_line = blocks[i+1]
+        
+        # Clean variable name (remove markdown formatting, parenthesis)
+        # var_name = re.sub(r'\*\*|\(.*?\)', '', var_line).strip()
+        # var_name = re.sub(r'\s+', ' ', var_name)  # Collapse whitespace
+        var_name = f'col_{i}'
+
+        protocol_data[var_name] = val_line.strip()
+        i += 2
+    
+    new_names = ['beratung_type', 'beratung_datum', 'beratung_dauer',
+        'tandem', 'vorbereitung', 'nachbereitung', 'beratung_nr', 'schwierigkeit',
+        'herausforderungen', 'inhalt', 'klärung', 'ratschläge'] 
+
+    return {new_names[i]: v for i, (k, v) in enumerate(protocol_data.items())}
+
+def get_room_id(config: Config, rocket: RocketChat):
+    cache_file = "room_id_cache.txt"
+    room_id = None
+
+    # Try to read cache
+    if os.path.exists(cache_file):
+        logger.info("Room-ID Cache Datei gefunden.")
+        with open(cache_file, "r") as f:
+            contents = f.read().split("=")
+            if len(contents) == 2 and contents[0] == config.rc_channel:
+                room_id = contents[1]
+
+    # If not cached or cache invalid, fetch and update cache
+    if room_id is None:
+        try:
+            roomid_response = rocket.rooms_info(room_name=re.sub('#', '', config.rc_channel))
+            room_id = json.loads(roomid_response.text)['room']['_id']
+        except Exception as e:
+            logger.error("Fehler beim Abrufen der Room-ID für den Rocket-Chat-Kanal: %s", e)
+            room_id = None
+        if room_id is not None:
+            with open(cache_file, "w") as f:
+                f.write(f"{config.rc_channel}={room_id}")
+
+    return room_id
+
+
+def rocketchat_get_protocols(config: Config, rocket: RocketChat):
     logger.info("Rufe neue Mentions von Rocketchat ab.")
+    room_id = get_room_id(config, rocket)
+    response = rocket.chat_get_mentioned_messages(room_id)
+    logger.info(f"Status: {response.status_code}")
 
 def rocketchat_protocol_receiver(config: Config):
     logger.info("Verarbeite das erhaltene Protokoll")
@@ -600,6 +670,7 @@ def main():
         logger.info(f"{len(messages)} Emails geladen.")
         clean_up_processed_file(config.processed_file, messages, processed_emails)
         process_many_emails(messages, config, account, processed_emails, rocket)
+        rocketchat_get_protocols(config = config, rocket = rocket)
     except Exception as e:
         logger.error(f"Fehler beim ersten Abruf: {e}")
     try:
