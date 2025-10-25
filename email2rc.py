@@ -418,11 +418,12 @@ def rc_post_detail_thread(rocket: RocketChat, config: Config, email_data: Dict[s
         return None
 
 def rc_post_template(rocket: RocketChat, 
-                    config: Config,  
+                    config: Config,
+                    email_data: Dict[str, str], 
                     rc_id: str) -> Optional[str]:
     try:
-        logger.info(f"🚀 Poste Protokoll Template in Thread unter Nachricht mit ID {rc_id}")
-        text=f"Protokoll-Vorlage: Sende sie nach der Beratung ausgefüllt in diesen Thread.\n```\n@fb01bot : Protokoll zur ID={rc_id}\n\n--- **Beratung?** (Präsenz/Zoom/Keine)---\nPräsenz\n--- **Datum d. Beratung** (TT.MM.JJJJ) ---\n\n--- **Dauer d. Beratung** in Minuten ---\n45\n--- **Tandempartner∗in** (@uk...) ---\n@\n--- **Vorbereitungszeit aller Beratenden addiert**, in Minuten, ohne Email-Verkehr ---\n0\n--- **Nachbereitungszeit aller Beratenden addiert**, in Minuten, ohne Email-Verkehr ---\n10\n--- **Nummer der Beratung** (für dieses Anliegen) (1, 2, 3...) ---\n1\n--- **Schwierigkeitsgrad der Gesprächssituation** (0 = super easy - 10 = sehr herausfordernd) ---\n\n--- **Herausforderungen** (Schlagworte) ---\n\n--- **Inhaltliche Themen / Analysemethoden** (Schlagworte) ---\n\n--- **Das Anliegen konnte zufriedenstellend geklärt werden** (0 = gar nicht - 10 = äußerst gut) ---\n\n--- **Anliegen und gegebene Ratschläge** (Freitext) ---\n\n```"
+        logger.info(f"🚀 Poste Protokoll Template in Thread unter Nachricht mit ID {rc_id} ({email_data['sender_name']})")
+        text=f"Protokoll-Vorlage: Sende sie nach der Beratung ausgefüllt in diesen Thread.\n```\n@fb01bot : Protokoll zu {email_data['sender_name']} (tm_id={rc_id})\n\n--- **Beratung?** (Präsenz/Zoom/Keine)---\nPräsenz\n--- **Datum d. Beratung** (TT.MM.JJJJ) ---\n\n--- **Dauer d. Beratung** in Minuten ---\n45\n--- **Tandempartner∗in** (@uk...) ---\n@\n--- **Vorbereitungszeit aller Beratenden addiert**, in Minuten, ohne Email-Verkehr ---\n0\n--- **Nachbereitungszeit aller Beratenden addiert**, in Minuten, ohne Email-Verkehr ---\n10\n--- **Nummer der Beratung** (für dieses Anliegen) (1, 2, 3...) ---\n1\n--- **Schwierigkeitsgrad der Gesprächssituation** (0 = super easy - 10 = sehr herausfordernd) ---\n\n--- **Herausforderungen** (Schlagworte) ---\n\n--- **Inhaltliche Themen / Analysemethoden** (Schlagworte) ---\n\n--- **Das Anliegen konnte zufriedenstellend geklärt werden** (0 = gar nicht - 10 = äußerst gut) ---\n\n--- **Anliegen und gegebene Ratschläge** (Freitext) ---\n\n```"
         response = rocket.chat_post_message(
             room_id=config.rc_channel,
             tmid=rc_id,
