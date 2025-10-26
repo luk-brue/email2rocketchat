@@ -1,6 +1,6 @@
 import csv
 import os
-from stats_table_manager import StatsTableManager # custom class
+from stats_table_manager import StatsTableManager, glimpse # custom class
 from dotenv import load_dotenv
 import re
 import time
@@ -18,6 +18,7 @@ from pprint import pprint, pformat
 from rocketchat_API.rocketchat import RocketChat
 import traceback
 import json
+import pandas as pd
 
 
 
@@ -52,9 +53,6 @@ RC_USER = username rocketchat
 # Logging konfigurieren
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
-
-# Statistik-Klasse
-stats = StatsTableManager(logger=logger)
 
 # Konfigurationsklasse
 class Config:
@@ -456,7 +454,7 @@ def process_all_inbox(config: Config,
                         rocket: RocketChat):
     pass
 
-def process_email(config: Config, account: Account, message: Message, processed_emails: Set[str], rocket: RocketChat) -> bool:
+def process_email(config: Config, account: Account, message: Message, processed_emails: Set[str], rocket: RocketChat, stats: StatsTableManager) -> bool:
     """Verarbeitet eine einzelne E-Mail."""
     try:
         message_id = message.message_id
@@ -506,13 +504,13 @@ def process_email(config: Config, account: Account, message: Message, processed_
     return True
 
 def process_many_emails(messages: list, config: Config, account: Account, processed_emails: Set[str],
-                    rocket: RocketChat):
+                    rocket: RocketChat, stats: StatsTableManager):
     """Verarbeitet viele E-Mails."""
     try:
         logger.info(f"Verarbeite {len(messages)} E-Mails...")
         for message in messages:
             try:
-                process_email(config, account, message, processed_emails, rocket)
+                process_email(config, account, message, processed_emails, rocket, stats)
             except Exception as e:
                 logger.error(f"Fehler beim Verarbeiten der E-Mail {message.message_id}: {e}")
                 import traceback
@@ -549,9 +547,10 @@ def sync_emails(account: Account):
 def maintain_notification_streaming(account: Account,
                                     config: Config,
                                     processed_emails: Set[str],
-                                    timeout_minutes: int=29, 
-                                    only_fields = ['headers', 'subject', 'sender', 'datetime_received', 'datetime_sent', 'body', 'message_id'],
-                                    rocket = RocketChat):
+                                    stats: StatsTableManager,
+                                    rocket: RocketChat,
+                                    timeout_minutes: int=29,
+                                    only_fields = ['headers', 'subject', 'sender', 'datetime_received', 'datetime_sent', 'body', 'message_id']):
     """:params: inbox = Account.inbox
     :params: timeout_minutes = Positive integer between 1 and 29 (internally, 1 minute is added)
     """
@@ -576,7 +575,8 @@ def maintain_notification_streaming(account: Account,
                                             account=account, 
                                             message=item,
                                             processed_emails=processed_emails,
-                                            rocket=rocket)
+                                            rocket=rocket,
+                                            stats=stats)
                             logger.info("📭 Warte auf weitere neue Mails.")
         except (ConnectionError, TimeoutError) as e:  
             logger.error(f"Verbindungsfehler oder Timeout während des Empfangens der Notifications: Verbindung wird in 5s wieder hergestellt: {e}")  
@@ -600,7 +600,7 @@ def parse_protocol_message(msg_text):
     
     # Split the message into blocks
     blocks = re.split(r'---', msg_text)
-    blocks = [block.strip() for block in blocks if block.strip()]
+    blocks = [b.strip() for b in blocks]  # keep '' elements if any
     blocks = blocks[1:]  # discard first block   
     # Pair variable names with values
     i = 0
@@ -620,7 +620,10 @@ def parse_protocol_message(msg_text):
         'tandem', 'vorbereitung', 'nachbereitung', 'beratung_nr', 'schwierigkeit',
         'herausforderungen', 'inhalt', 'klärung', 'ratschläge'] 
 
-    return {new_names[i]: v for i, (k, v) in enumerate(protocol_data.items())}
+    output = {new_names[i]: v for i, (k, v) in enumerate(protocol_data.items())}
+    for name in new_names:
+        output.setdefault(name, '') # use empty strings instead of NaN.
+    return output
 
 def get_room_id(config: Config, rocket: RocketChat):
     cache_file = "room_id_cache.txt"
@@ -637,10 +640,11 @@ def get_room_id(config: Config, rocket: RocketChat):
     # If not cached or cache invalid, fetch and update cache
     if room_id is None:
         try:
+            logger.info("📡 Frage Room-ID von RocketChat API ab")
             roomid_response = rocket.rooms_info(room_name=re.sub('#', '', config.rc_channel))
             room_id = json.loads(roomid_response.text)['room']['_id']
         except Exception as e:
-            logger.error("Fehler beim Abrufen der Room-ID für den Rocket-Chat-Kanal: %s", e)
+            logger.error("Fehler beim Abrufen der Room-ID für den RocketChat-Kanal: %s", e)
             room_id = None
         if room_id is not None:
             with open(cache_file, "w") as f:
@@ -650,17 +654,65 @@ def get_room_id(config: Config, rocket: RocketChat):
 
 
 def rocketchat_get_protocols(config: Config, rocket: RocketChat):
-    logger.info("Rufe neue Mentions von Rocketchat ab.")
-    room_id = get_room_id(config, rocket)
-    response = rocket.chat_get_mentioned_messages(room_id)
-    logger.info(f"Status: {response.status_code}")
+    try:
+        logger.info("📡 Rufe Mentions von Rocketchat API ab.")
+        room_id = get_room_id(config, rocket)
+        response = rocket.chat_get_mentioned_messages(room_id)
+        logger.info(f"Status: {response.status_code}")
+    except:
+        logger.error("Fehler beim Abrufen der Mentions.")
+    try: 
+        mentions = json.loads(response.text)
+        # Extract desired fields
+        mentionlist = []
+        for mention in mentions.get("messages", []):
+            temp = {
+                'msg_text': mention.get("msg"),
+                'protocol_send_date': mention.get("ts"),
+                'protocol_sender_name': mention.get("u", {}).get("name"),
+                'protocol_sender_user': mention.get("u", {}).get("username"),
+                'tmid': mention.get("tmid"),
+                'protocol_msg_id': mention.get("_id")
+            }
+            mentionlist.append(temp)
+        logger.info(f"{len(mentionlist)} Mentions gefunden.")
+        mentiondf = pd.DataFrame(mentionlist)
+        # Filtere nur die Protokolle und schmeiß den Rest heraus
+        mentiondf = mentiondf[mentiondf['msg_text'].str.startswith('@fb01bot : Protokoll zu ')]
+        # Nachrichten vom Bot an sich selbst rausschmeißen
+        mentiondf = mentiondf[mentiondf['protocol_sender_user'] != 'fb01bot']
+        logger.info(f"Davon sind {len(mentiondf)} Protokolle")
+        logger.info(glimpse(mentiondf))
+        return mentiondf
+    except Exception as e:
+        logger.error(f"Fehler beim Verarbeiten der Mentions: {e}")
+        return None
 
-def rocketchat_protocol_receiver(config: Config):
-    logger.info("Verarbeite das erhaltene Protokoll")
+def process_protocols(mentiondf: pd.DataFrame, stats: StatsTableManager):
+    try:
+        logger.info("Verarbeite die erhaltenen Protokolle")
+        # parse protocol data. 
+        dicts_series = mentiondf['msg_text'].apply(parse_protocol_message)
+        parsed_protocols = pd.DataFrame(dicts_series.tolist())
+        logger.info(f"ParsedProtocols: {glimpse(parsed_protocols)}")
+        mentiondf = mentiondf.reset_index(drop=True)
+        parsed_protocols = parsed_protocols.reset_index(drop=True)
+        try:
+            assert mentiondf.index.equals(parsed_protocols.index), "Indizes stimmen nicht überein"
+            assert mentiondf.shape[0] == parsed_protocols.shape[0], "Protokoll-Metadaten-Tabelle und Protokoll-Inhaltstabelle haben unterschiedliche Anzahl von Zeilen. Das sollte nicht so sein"
+            merged_df = pd.concat([mentiondf, parsed_protocols], axis=1)
+            logger.info(f"merged_df: {len(merged_df)}")
+        except AssertionError as e:
+            logger.error(f"Fehler: Merging der geparsten Protokolle in den Datensatz mit Protokoll-Metadaten nicht möglich: {e}")
+        # save merged df
+        stats.save_df2(merged_df.drop(columns=['msg_text']))
+    except Exception as e:
+        logger.error(f"Fehler in process_protocols: {e}")
 
 def main():
     """Hauptfunktion."""
     config = Config()
+    stats = StatsTableManager(logger=logger)
     try:
         account = init_exchange_connection(config)
         rocket = rocket_chat_login(config)
@@ -669,12 +721,14 @@ def main():
         messages = list(account.inbox.all().order_by('-datetime_received')[:100])
         logger.info(f"{len(messages)} Emails geladen.")
         clean_up_processed_file(config.processed_file, messages, processed_emails)
-        process_many_emails(messages, config, account, processed_emails, rocket)
-        rocketchat_get_protocols(config = config, rocket = rocket)
+        process_many_emails(messages, config, account, processed_emails, rocket, stats)
+        mentiondf = rocketchat_get_protocols(config = config, rocket = rocket)
+        process_protocols(mentiondf, stats)
     except Exception as e:
         logger.error(f"Fehler beim ersten Abruf: {e}")
     try:
-        maintain_notification_streaming(account, config, processed_emails, 29, rocket=rocket)
+        maintain_notification_streaming(account, config, processed_emails, stats, rocket, 29)
+        pass    
     except Exception as e:
         logger.error(f"Fehler beim Notification Streaming und Verarbeiten neuer Mails: {e}")
         logger.error(traceback.format_exc())

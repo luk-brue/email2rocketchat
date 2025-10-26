@@ -1,18 +1,25 @@
 import os
 import pandas as pd
 
+def glimpse(df):
+    print(f"Rows: {df.shape[0]}")
+    print(f"Columns: {df.shape[1]}")
+    for col in df.columns:
+        print(f"$ {col} <{df[col].dtype}> {df[col].head().values}")
+
 class StatsTableManager:
     """
-    Manages a stats table stored in a CSV file.
+    Manages 2 stats tables stored in CSV files.
     
-    - On init, checks for the file and creates it if missing.
+    - On init, checks for the files and creates them if missing.
     - Provides methods to append new records and update rows.
     
     Parameters:
     - logger: a logging object with .info and .error methods.
     """
-    FILENAME = 'stats.csv'
-    HEADERS = [
+    FILENAME1 = 'stats.csv'
+    FILENAME2 = 'parsed_protocols.csv'
+    HEADERS1 = [
         'sender_name',
         'message_id', # email identifier
         'tmid',
@@ -22,74 +29,54 @@ class StatsTableManager:
         'betreuung',
         'studiengang',
         'fachgebiet',
+    ]
+    HEADERS2 = [
         'protocol_send_date',
         'beratung_type', 'beratung_datum', 'beratung_dauer',
         'tandem', 'vorbereitung', 'nachbereitung', 'beratung_nr', 'schwierigkeit',
-        'herausforderungen', 'inhalt', 'klärung', 'ratschläge'
+        'herausforderungen', 'inhalt', 'klärung', 'ratschläge',
+        'protocol_sender_name', 'protocol_sender_user', 'protocol_msg_id'
     ]
 
     def __init__(self, logger):
         self.logger = logger
-        if not os.path.exists(self.FILENAME):
-            self.logger.info(f"StatsTableManager: {self.FILENAME} nicht gefunden. Erstelle neue Datei.")
-            pd.DataFrame(columns=self.HEADERS).to_csv(self.FILENAME, index=False)
+        if not os.path.exists(self.FILENAME1):
+            self.logger.info(f"StatsTableManager: {self.FILENAME1} nicht gefunden. Erstelle neue Datei.")
+            pd.DataFrame(columns=self.HEADERS1).to_csv(self.FILENAME1, index=False)
+        if not os.path.exists(self.FILENAME2):
+            self.logger.info(f"StatsTableManager: {self.FILENAME2} nicht gefunden. Erstelle neue Datei.")
+            pd.DataFrame(columns=self.HEADERS2).to_csv(self.FILENAME2, index=False)
         self._load_df()
+        self._load_df2()
 
     def _load_df(self):
-        self.logger.info(f"StatsTableManager: {self.FILENAME} gefunden.")
-        self.df = pd.read_csv(self.FILENAME, dtype=str)
-        self.logger.info(f"StatsTableManager: {self.FILENAME} eingelesen.")
+        self.logger.info(f"StatsTableManager: {self.FILENAME1} gefunden.")
+        self.df = pd.read_csv(self.FILENAME1, dtype=str)
+        self.logger.info(f"StatsTableManager: {self.FILENAME1} eingelesen.")
         self.df.fillna('', inplace=True)  # treat empty as ""
+    def _load_df2(self):
+        self.logger.info(f"StatsTableManager: {self.FILENAME2} gefunden.")
+        self.df2 = pd.read_csv(self.FILENAME2, dtype=str)
+        self.logger.info(f"StatsTableManager: {self.FILENAME2} eingelesen.")
+        self.df2.fillna('', inplace=True)
 
     def _save_df(self):
-        self.df.to_csv(self.FILENAME, index=False)
+        self.df.to_csv(self.FILENAME1, index=False)
         self.logger.info("StatsTableManager: Daten in CSV auf Festplatte gespeichert.")
+    def _save_df2(self):
+        self.df2.to_csv(self.FILENAME2, index=False)
+        self.logger.info("StatsTableManager: Daten in CSV auf Festplatte gespeichert.")
+    def _append_df2(self):
+        self.df2.to_csv(self.FILENAME2, index=False, mode='a', header=False)
+        self.logger.info("StatsTableManager: Daten an CSV angehängt.")
 
-    def append_record(self, record_dict):
+    def append_record_df(self, record_dict):
         """Add a new row. Missing fields default to empty string."""
-        new_row = {h: record_dict.get(h, "") for h in self.HEADERS}
+        new_row = {h: record_dict.get(h, "") for h in self.HEADERS1}
         self.df = pd.concat([self.df, pd.DataFrame([new_row])], ignore_index=True)
         self.logger.info(f"StatsTableManager: Daten hinzugefügt von {new_row['sender_name']}.")
         self._save_df()
-
-    def update_or_append_record(self, id_dict, update_dict):
-        """
-        Update an existing row or append a new one.
-        - id_dict: should have 'tmid', optionally 'beratung_nr', 'protocol_send_date'
-        - update_dict: fields to fill in (e.g. 'beratung_nr', 'protocol_send_date')
-        """
-        tmid = id_dict.get('tmid', '')
-        beratung_nr = id_dict.get('beratung_nr', '')
-        protocol_send_date = id_dict.get('protocol_send_date', '')
-
-        # Filter by tmid first
-        matches = self.df[self.df['tmid'] == tmid]
-        if beratung_nr:
-            matches = matches[matches['beratung_nr'] == beratung_nr]
-        elif protocol_send_date:
-            matches = matches[matches['protocol_send_date'] == protocol_send_date]
-
-        if not matches.empty:
-            # Check for beratung_nr match
-            for idx, row in matches.iterrows():
-                # Wenn neues Protokoll hinterlegt wird wegen neuer Beratung
-                if beratung_nr and row['beratung_nr'] != beratung_nr:
-                    # Create new row
-                    new_row = {**row, **update_dict}
-                    self.df = pd.concat([self.df, pd.DataFrame([new_row])], ignore_index=True)
-                    self.logger.info(f"StatsTableManager: beratung_nr not existing yet, created new row: {new_row}")
-                else:
-                    # Update in place
-                    for k, v in update_dict.items():
-                        if row[k] != v:
-                            self.logger.info(f"StatsTableManager: Updating {k} from {row[k]} to {v} for row index {idx}")
-                            self.df.at[idx, k] = v
-            self._save_df()
-        else:
-            # No match, create new row
-            new_row = {h: id_dict.get(h, "") for h in self.HEADERS}
-            for k, v in update_dict.items():
-                new_row[k] = v
-            self.df = pd.concat([self.df, pd.DataFrame([new_row])], ignore_index=True)
-            self.logger.info(f"StatsTableManager: No matching row, appended new row: {new_row}")
-            self._save_df()
+    
+    def save_df2(self, df):
+        self.df2 = df
+        self._append_df2()
