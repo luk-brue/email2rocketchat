@@ -1,7 +1,8 @@
 import csv
 import os
 from stats_table_manager import StatsTableManager, glimpse # custom class
-from dotenv import load_dotenv
+from rocketchat_message_listener import RocketChatMessageListener
+from config import Config
 import re
 import time
 import logging
@@ -55,17 +56,6 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 logger = logging.getLogger(__name__)
 
 # Konfigurationsklasse
-class Config:
-    def __init__(self):
-        load_dotenv()
-        self.uk_nummer = os.getenv("UK_NUMMER")
-        self.email_address = os.getenv("EMAIL_ADDRESS")
-        self.email_password = os.getenv("EMAIL_PASSWORD")
-        self.rc_pass = os.getenv("RC_PASS")
-        self.rc_server = os.getenv("RC_SERVER", "").rstrip('/')
-        self.rc_user = os.getenv("RC_USER")
-        self.processed_file = 'processed_emails.csv'
-        self.rc_channel = os.getenv("RC_CHANNEL")
 
 def init_exchange_connection(config: Config) -> Account:
     """Initialisiert die Verbindung zu Exchange. Sollten hier mit der Konfigurations jemals
@@ -625,69 +615,6 @@ def parse_protocol_message(msg_text):
         output.setdefault(name, '') # use empty strings instead of NaN.
     return output
 
-def get_room_id(config: Config, rocket: RocketChat):
-    cache_file = "room_id_cache.txt"
-    room_id = None
-
-    # Try to read cache
-    if os.path.exists(cache_file):
-        logger.info("Room-ID Cache Datei gefunden.")
-        with open(cache_file, "r") as f:
-            contents = f.read().split("=")
-            if len(contents) == 2 and contents[0] == config.rc_channel:
-                room_id = contents[1]
-
-    # If not cached or cache invalid, fetch and update cache
-    if room_id is None:
-        try:
-            logger.info("📡 Frage Room-ID von RocketChat API ab")
-            roomid_response = rocket.rooms_info(room_name=re.sub('#', '', config.rc_channel))
-            room_id = json.loads(roomid_response.text)['room']['_id']
-        except Exception as e:
-            logger.error("Fehler beim Abrufen der Room-ID für den RocketChat-Kanal: %s", e)
-            room_id = None
-        if room_id is not None:
-            with open(cache_file, "w") as f:
-                f.write(f"{config.rc_channel}={room_id}")
-
-    return room_id
-
-
-def rocketchat_get_protocols(config: Config, rocket: RocketChat):
-    try:
-        logger.info("📡 Rufe Mentions von Rocketchat API ab.")
-        room_id = get_room_id(config, rocket)
-        response = rocket.chat_get_mentioned_messages(room_id)
-        logger.info(f"Status: {response.status_code}")
-    except:
-        logger.error("Fehler beim Abrufen der Mentions.")
-    try: 
-        mentions = json.loads(response.text)
-        # Extract desired fields
-        mentionlist = []
-        for mention in mentions.get("messages", []):
-            temp = {
-                'msg_text': mention.get("msg"),
-                'protocol_send_date': mention.get("ts"),
-                'protocol_sender_name': mention.get("u", {}).get("name"),
-                'protocol_sender_user': mention.get("u", {}).get("username"),
-                'tmid': mention.get("tmid"),
-                'protocol_msg_id': mention.get("_id")
-            }
-            mentionlist.append(temp)
-        logger.info(f"{len(mentionlist)} Mentions gefunden.")
-        mentiondf = pd.DataFrame(mentionlist)
-        # Filtere nur die Protokolle und schmeiß den Rest heraus
-        mentiondf = mentiondf[mentiondf['msg_text'].str.startswith('@fb01bot : Protokoll zu ')]
-        # Nachrichten vom Bot an sich selbst rausschmeißen
-        mentiondf = mentiondf[mentiondf['protocol_sender_user'] != 'fb01bot']
-        logger.info(f"Davon sind {len(mentiondf)} Protokolle")
-        logger.info(glimpse(mentiondf))
-        return mentiondf
-    except Exception as e:
-        logger.error(f"Fehler beim Verarbeiten der Mentions: {e}")
-        return None
-
 def process_protocols(mentiondf: pd.DataFrame, stats: StatsTableManager):
     try:
         logger.info("Verarbeite die erhaltenen Protokolle")
@@ -713,6 +640,7 @@ def main():
     """Hauptfunktion."""
     config = Config()
     stats = StatsTableManager(logger=logger)
+    rclistener = RocketChatMessageListener(rocket, config, logger)
     try:
         account = init_exchange_connection(config)
         rocket = rocket_chat_login(config)
