@@ -5,7 +5,7 @@ def glimpse(df):
     print(f"Rows: {df.shape[0]}")
     print(f"Columns: {df.shape[1]}")
     for col in df.columns:
-        print(f"$ {col} <{df[col].dtype}> {df[col].head().values}")
+        print(f"$ {col} {df[col].head().values[:20]}")
 
 class StatsTableManager:
     """
@@ -19,7 +19,7 @@ class StatsTableManager:
     """
     FILENAME1 = 'stats.csv'
     FILENAME2 = 'parsed_protocols.csv'
-    HEADERS1 = [
+    HEADERS = [
         'sender_name',
         'message_id', # email identifier
         'tmid',
@@ -30,6 +30,7 @@ class StatsTableManager:
         'studiengang',
         'fachgebiet',
     ]
+
     HEADERS2 = [
         'protocol_send_date',
         'beratung_type', 'beratung_datum', 'beratung_dauer',
@@ -42,7 +43,7 @@ class StatsTableManager:
         self.logger = logger
         if not os.path.exists(self.FILENAME1):
             self.logger.info(f"StatsTableManager: {self.FILENAME1} nicht gefunden. Erstelle neue Datei.")
-            pd.DataFrame(columns=self.HEADERS1).to_csv(self.FILENAME1, index=False)
+            pd.DataFrame(columns=self.HEADERS).to_csv(self.FILENAME1, index=False)
         if not os.path.exists(self.FILENAME2):
             self.logger.info(f"StatsTableManager: {self.FILENAME2} nicht gefunden. Erstelle neue Datei.")
             pd.DataFrame(columns=self.HEADERS2).to_csv(self.FILENAME2, index=False)
@@ -70,9 +71,9 @@ class StatsTableManager:
         self.df2.to_csv(self.FILENAME2, index=False, mode='a', header=False)
         self.logger.info("StatsTableManager: Daten an CSV angehängt.")
 
-    def append_record_df(self, record_dict):
+    def append_record(self, record_dict):
         """Add a new row. Missing fields default to empty string."""
-        new_row = {h: record_dict.get(h, "") for h in self.HEADERS1}
+        new_row = {h: record_dict.get(h, "") for h in self.HEADERS}
         self.df = pd.concat([self.df, pd.DataFrame([new_row])], ignore_index=True)
         self.logger.info(f"StatsTableManager: Daten hinzugefügt von {new_row['sender_name']}.")
         self._save_df()

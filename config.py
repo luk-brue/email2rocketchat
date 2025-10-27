@@ -12,3 +12,4 @@ class Config:
         self.rc_user = os.getenv("RC_USER")
         self.processed_file = 'processed_emails.csv'
         self.rc_channel = os.getenv("RC_CHANNEL")
+        self.rc_command_channel = os.getenv("RC_COMMAND_CHANNEL")

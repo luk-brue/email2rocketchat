@@ -21,8 +21,6 @@ import traceback
 import json
 import pandas as pd
 
-
-
 """
 Das Skript kann auf ein Outlook Gruppenpostfach zugreifen und dort Typo3-Kontaktfor-
 mular-Anfragen aus dem Posteingang extrahieren. Dann kann das in RocketChat als Message gepostet werden,
@@ -49,13 +47,12 @@ UK_NUMMER = "uk012345"                           # nur die uk-nummer der Person 
 RC_SERVER = https://rocketchat.uni-kassel.de
 RC_PASS = passwort rocketchat
 RC_USER = username rocketchat
+RC_COMMAND_CHANNEL = der Name des Kanals, wo der Bot Befehle entgegen nimmt. 
 """
 
 # Logging konfigurieren
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
-
-# Konfigurationsklasse
 
 def init_exchange_connection(config: Config) -> Account:
     """Initialisiert die Verbindung zu Exchange. Sollten hier mit der Konfigurations jemals
@@ -376,7 +373,6 @@ def rc_post_detail_thread(rocket: RocketChat, config: Config, email_data: Dict[s
             croppedtext = detailtext[:4965] + f"\n[...] {msg_len - 4994} weitere Zeichen\n```"
         # RocketChat hat default die Einstellung Message_MaxAllowedSize auf 5000 Zeichen
         # Alles über 5000 Zeichen wird abgeschnitten, damit die Nachricht gepostet werden kann. 
-        #croppedtext=(detailtext[:4959] + '\n\n[...] 5000-Zeichen-Limit erreicht') if len(detailtext) > 5000 else detailtext
         # response = rocket.chat_send_message(
         #     message={"rid": config.rc_channel,
         #     "tmid": rc_id,
@@ -415,7 +411,7 @@ def rc_post_template(rocket: RocketChat,
                     rc_id: str) -> Optional[str]:
     try:
         logger.info(f"🚀 Poste Protokoll Template in Thread unter Nachricht mit ID {rc_id} ({email_data['sender_name']})")
-        text=f"Protokoll-Vorlage: Sende sie nach der Beratung ausgefüllt in diesen Thread.\n```\n@fb01bot : Protokoll zu {email_data['sender_name']} (tm_id={rc_id})\n\n--- **Beratung?** (Präsenz/Zoom/Keine)---\nPräsenz\n--- **Datum d. Beratung** (TT.MM.JJJJ) ---\n\n--- **Dauer d. Beratung** in Minuten ---\n45\n--- **Tandempartner∗in** (@uk...) ---\n@\n--- **Vorbereitungszeit aller Beratenden addiert**, in Minuten, ohne Email-Verkehr ---\n0\n--- **Nachbereitungszeit aller Beratenden addiert**, in Minuten, ohne Email-Verkehr ---\n10\n--- **Nummer der Beratung** (für dieses Anliegen) (1, 2, 3...) ---\n1\n--- **Schwierigkeitsgrad der Gesprächssituation** (0 = super easy - 10 = sehr herausfordernd) ---\n\n--- **Herausforderungen** (Schlagworte) ---\n\n--- **Inhaltliche Themen / Analysemethoden** (Schlagworte) ---\n\n--- **Das Anliegen konnte zufriedenstellend geklärt werden** (0 = gar nicht - 10 = äußerst gut) ---\n\n--- **Anliegen und gegebene Ratschläge** (Freitext) ---\n\n```"
+        text=f"Protokoll-Vorlage: Sende sie nach der Beratung ausgefüllt in diesen Thread.\n```\n@fb01bot : Protokoll zu {email_data['sender_name']} (tmid={rc_id})\n\n▸ **Beratung?** (Präsenz/Zoom/Keine):\nPräsenz\n▸ **Datum d. Beratung** (TT.MM.JJJJ):\n\n▸ **Dauer d. Beratung** in Minuten:\n45\n▸ **Tandempartner∗in** (@uk...):\n@\n▸ **Vorbereitungszeit aller Beratenden addiert**, in Minuten, ohne Email-Verkehr:\n0\n▸ **Nachbereitungszeit aller Beratenden addiert**, in Minuten, ohne Email-Verkehr:\n10\n▸ **Nummer der Beratung** (für dieses Anliegen) (1, 2, 3...):\n1\n▸ **Schwierigkeitsgrad der Gesprächssituation** (0 = super easy - 10 = sehr herausfordernd):\n\n▸ **Herausforderungen** (Schlagworte):\n\n▸ **Inhaltliche Themen / Analysemethoden** (Schlagworte):\n\n▸ **Das Anliegen konnte zufriedenstellend geklärt werden** (0 = gar nicht - 10 = äußerst gut):\n\n▸ **Anliegen und gegebene Ratschläge** (Freitext):\n\n\n```"
         response = rocket.chat_post_message(
             room_id=config.rc_channel,
             tmid=rc_id,
@@ -436,13 +432,6 @@ def rc_post_template(rocket: RocketChat,
         logger.error(f"❌ Unerwarteter Fehler beim Versenden des RocketChat Protokoll Templates: {e}")
         logger.error(traceback.format_exc())
         return None
-
-
-def process_all_inbox(config: Config,
-                        account: Account,
-                        processed_emails: Set[str],
-                        rocket: RocketChat):
-    pass
 
 def process_email(config: Config, account: Account, message: Message, processed_emails: Set[str], rocket: RocketChat, stats: StatsTableManager) -> bool:
     """Verarbeitet eine einzelne E-Mail."""
@@ -477,6 +466,9 @@ def process_email(config: Config, account: Account, message: Message, processed_
         rocket_chat_login(config)
         logger.info("Login wurde erneuert. Versuche RocketChat Message noch mal zu posten:")
         rc_id = rc_post_message(config, email_data, rocket = rocket)
+    if rc_id is None:
+        logger.error("Fehler - Thread-ID (rc_id) ist None")
+        raise
     rc_post_detail_thread(config = config, rocket = rocket, email_data = email_data, rc_id = rc_id)
     save_processed_email(filename=config.processed_file, message_id=message_id)
     # collect keys and data to be saved in stats.csv
@@ -484,8 +476,8 @@ def process_email(config: Config, account: Account, message: Message, processed_
         allowed_keys = set(stats.HEADERS)
         mail_record = {k: v for k, v in email_data.items() if k in allowed_keys}
         mail_record.update({'tmid': rc_id}) # add the thread message id
-    except:
-        logger.error("Fehler beim Sammeln der Email-Daten für die Statistik")
+    except Exception as e:
+        logger.error("Fehler beim Sammeln der Email-Daten für die Statistik", e)
     stats.append_record(mail_record) # save data to stats.csv
     rc_post_template(config = config, 
         rocket = rocket, 
@@ -573,85 +565,20 @@ def maintain_notification_streaming(account: Account,
             time.sleep(5)  # Brief pause before reconnecting  
             continue
 
-# Protokoll-Empfangslogik
-def parse_protocol_message(msg_text):
-    """
-    Wird angewendet auf den 'msg'-Inhalt einer Mention aus dem chat.getMentions JSON Output
-    Parses a protocol message with alternating '--- variable ---' and 'value' blocks.
-
-    Returns a dictionary with cleaned variable names as keys and their corresponding values.
-    """
-    protocol_data = {}
-
-    # Parse the header for meta-info (e.g., tm_id)
-    # header_match = re.search(r'tm_id=([a-zA-Z0-9]+)', msg_text)
-    # if header_match:
-    #     protocol_data['tmid'] = header_match.group(1)
-    
-    # Split the message into blocks
-    blocks = re.split(r'---', msg_text)
-    blocks = [b.strip() for b in blocks]  # keep '' elements if any
-    blocks = blocks[1:]  # discard first block   
-    # Pair variable names with values
-    i = 0
-    while i < len(blocks) - 1:
-        var_line = blocks[i]
-        val_line = blocks[i+1]
-        
-        # Clean variable name (remove markdown formatting, parenthesis)
-        # var_name = re.sub(r'\*\*|\(.*?\)', '', var_line).strip()
-        # var_name = re.sub(r'\s+', ' ', var_name)  # Collapse whitespace
-        var_name = f'col_{i}'
-
-        protocol_data[var_name] = val_line.strip()
-        i += 2
-    
-    new_names = ['beratung_type', 'beratung_datum', 'beratung_dauer',
-        'tandem', 'vorbereitung', 'nachbereitung', 'beratung_nr', 'schwierigkeit',
-        'herausforderungen', 'inhalt', 'klärung', 'ratschläge'] 
-
-    output = {new_names[i]: v for i, (k, v) in enumerate(protocol_data.items())}
-    for name in new_names:
-        output.setdefault(name, '') # use empty strings instead of NaN.
-    return output
-
-def process_protocols(mentiondf: pd.DataFrame, stats: StatsTableManager):
-    try:
-        logger.info("Verarbeite die erhaltenen Protokolle")
-        # parse protocol data. 
-        dicts_series = mentiondf['msg_text'].apply(parse_protocol_message)
-        parsed_protocols = pd.DataFrame(dicts_series.tolist())
-        logger.info(f"ParsedProtocols: {glimpse(parsed_protocols)}")
-        mentiondf = mentiondf.reset_index(drop=True)
-        parsed_protocols = parsed_protocols.reset_index(drop=True)
-        try:
-            assert mentiondf.index.equals(parsed_protocols.index), "Indizes stimmen nicht überein"
-            assert mentiondf.shape[0] == parsed_protocols.shape[0], "Protokoll-Metadaten-Tabelle und Protokoll-Inhaltstabelle haben unterschiedliche Anzahl von Zeilen. Das sollte nicht so sein"
-            merged_df = pd.concat([mentiondf, parsed_protocols], axis=1)
-            logger.info(f"merged_df: {len(merged_df)}")
-        except AssertionError as e:
-            logger.error(f"Fehler: Merging der geparsten Protokolle in den Datensatz mit Protokoll-Metadaten nicht möglich: {e}")
-        # save merged df
-        stats.save_df2(merged_df.drop(columns=['msg_text']))
-    except Exception as e:
-        logger.error(f"Fehler in process_protocols: {e}")
-
 def main():
     """Hauptfunktion."""
     config = Config()
     stats = StatsTableManager(logger=logger)
-    rclistener = RocketChatMessageListener(rocket, config, logger)
     try:
         account = init_exchange_connection(config)
         rocket = rocket_chat_login(config)
+        rclistener = RocketChatMessageListener(rocket, config, logger)
         processed_emails=load_processed_emails(config.processed_file)
         logger.info("Lade max. 100 Emails aus der INBOX")
         messages = list(account.inbox.all().order_by('-datetime_received')[:100])
         logger.info(f"{len(messages)} Emails geladen.")
         clean_up_processed_file(config.processed_file, messages, processed_emails)
         process_many_emails(messages, config, account, processed_emails, rocket, stats)
-        mentiondf = rocketchat_get_protocols(config = config, rocket = rocket)
-        process_protocols(mentiondf, stats)
     except Exception as e:
         logger.error(f"Fehler beim ersten Abruf: {e}")
     try:
